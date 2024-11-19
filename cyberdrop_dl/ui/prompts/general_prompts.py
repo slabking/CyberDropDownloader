@@ -29,22 +29,23 @@ def main_prompt(manager: Manager) -> int:
             Choice(1, "Download"),
             Choice(2, "Download (All Configs)"),
             Choice(3, "Retry Failed Downloads"),
-            Choice(4, "Edit URLs File"),
+            Choice(4, "Sort All Configs"),
+            Choice(5, "Edit URLs"),
             Separator(),
-            Choice(5, f"Select Config (Current: {manager.config_manager.loaded_config})"),
-            Choice(6, "Change URLs.txt file and Download Location"),
-            Choice(7, "Manage Configs"),
+            Choice(6, f"Select Config (Current: {manager.config_manager.loaded_config})"),
+            Choice(7, "Change URLs.txt file and Download Location"),
+            Choice(8, "Edit Configs"),
             Separator(),
-            Choice(8, "Import Cyberdrop_V4 Items"),
-            Choice(9, "Donate"),
+            Choice(9, "Import Cyberdrop_V4 Items"),
             Choice(10, "Exit"),
         ], long_instruction="ARROW KEYS: Navigate | ENTER: Select",
+        vi_mode=manager.vi_mode,
     ).execute()
 
     return action
 
 
-def manage_configs_prompt() -> int:
+def manage_configs_prompt(manager: Manager) -> int:
     """Manage Configs Prompt"""
     console.clear()
     action = inquirer.select(
@@ -59,12 +60,13 @@ def manage_configs_prompt() -> int:
             Choice(6, "Edit Global Values"),
             Choice(7, "Done"),
         ], long_instruction="ARROW KEYS: Navigate | ENTER: Select",
+        vi_mode=manager.vi_mode,
     ).execute()
 
     return action
 
 
-def select_config_prompt(configs: List) -> str:
+def select_config_prompt(manager: Manager, configs: List) -> str:
     """Select a config file from a list of configs"""
     choice = inquirer.fuzzy(
         choices=configs,
@@ -73,6 +75,7 @@ def select_config_prompt(configs: List) -> str:
         invalid_message="Need to select a config.",
         message="Select a config file:",
         long_instruction="ARROW KEYS: Navigate | TYPE: Filter | TAB: select, ENTER: Finish Selection",
+        vi_mode=manager.vi_mode,
     ).execute()
 
     return choice
@@ -82,21 +85,23 @@ def import_cyberdrop_v4_items_prompt(manager: Manager) -> None:
     """Import Cyberdrop_V4 Items"""
     while True:
         console.clear()
-        console.print(f"Editing Config Values")
+        console.print("Editing Config Values")
         action = inquirer.select(
             message="What would you like to do?",
             choices=[
                 Choice(1, "Import Config"),
                 Choice(2, "Import download_history.sql"),
                 Choice(3, "Done"),
-            ], long_instruction="ARROW KEYS: Navigate | ENTER: Select"
+            ], long_instruction="ARROW KEYS: Navigate | ENTER: Select",
+            vi_mode=manager.vi_mode,
         ).execute()
 
         # Import Config
         if action == 1:
             new_config_name = inquirer.text(
                 message="What should this config be called?",
-                validate=EmptyInputValidator("Input should not be empty")
+                validate=EmptyInputValidator("Input should not be empty"),
+                vi_mode=manager.vi_mode,
             ).execute()
 
             if (manager.path_manager.config_dir / new_config_name).is_dir():
@@ -120,6 +125,7 @@ def import_cyberdrop_v4_items_prompt(manager: Manager) -> None:
                 message="Select the download_history.sql file to import",
                 default=home_path,
                 validate=PathValidator(is_file=True, message="Input is not a file"),
+                vi_mode=manager.vi_mode,
             ).execute()
 
             transfer_v4_db(import_download_history_path, manager.path_manager.history_db)
@@ -129,7 +135,7 @@ def import_cyberdrop_v4_items_prompt(manager: Manager) -> None:
             break
 
 
-def donations_prompt() -> None:
+def donations_prompt(manager: Manager) -> None:
     """Donations prompt"""
     console.clear()
     console.print("[bold]Donations[/bold]")
@@ -147,4 +153,4 @@ def donations_prompt() -> None:
     console.print("")
     console.print("Thank you for your support!")
     console.print("")
-    inquirer.confirm(message="Press enter to return to the main menu.").execute()
+    inquirer.confirm(message="Press enter to return to the main menu.", vi_mode=manager.vi_mode).execute()

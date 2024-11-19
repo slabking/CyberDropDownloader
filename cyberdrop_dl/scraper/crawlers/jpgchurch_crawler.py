@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 class JPGChurchCrawler(Crawler):
     def __init__(self, manager: Manager):
         super().__init__(manager, "jpg.church", "JPGChurch")
-        self.primary_base_domain = URL("https://jpg3.su")
+        self.primary_base_domain = URL("https://jpg4.su")
         self.request_limiter = AsyncLimiter(10, 1)
 
     """~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"""
@@ -72,6 +72,9 @@ class JPGChurchCrawler(Crawler):
     @error_handling_wrapper
     async def album(self, scrape_item: ScrapeItem) -> None:
         """Scrapes an album"""
+        album_id = scrape_item.url.parts[2]
+        results = await self.get_album_results(album_id)
+        
         async with self.request_limiter:
             soup = await self.client.get_BS4(self.domain, scrape_item.url / "sub")
 
@@ -89,11 +92,12 @@ class JPGChurchCrawler(Crawler):
         while True:
             async with self.request_limiter:
                 soup = await self.client.get_BS4(self.domain, link_next)
-            links = soup.select("a[href*=img]")
+            links = soup.select("a[href*=img] img")
             for link in links:
-                link = URL(link.get('href'))
-                new_scrape_item = await self.create_scrape_item(scrape_item, link, title, True)
-                self.manager.task_group.create_task(self.run(new_scrape_item))
+                link = URL(link.get('src'))
+                new_scrape_item = await self.create_scrape_item(scrape_item, link, title, True, album_id)
+                if not await self.check_album_results(link, results):
+                    await self.handle_direct_link(new_scrape_item)
 
             link_next = soup.select_one('a[data-pagination=next]')
             if link_next is not None:
@@ -127,8 +131,8 @@ class JPGChurchCrawler(Crawler):
     async def handle_direct_link(self, scrape_item: ScrapeItem) -> None:
         """Handles a direct link"""
         scrape_item.url = scrape_item.url.with_name(scrape_item.url.name.replace('.md.', '.').replace('.th.', '.'))
-        pattern = r"simp([1-5])\.jpg\.fish/"
-        scrape_item.url = URL(re.sub(pattern, r'simp\1.jpg.church/', str(scrape_item.url)))
+        pattern = r"(jpg\.fish/)|(jpg\.fishing/)|(jpg\.church/)"
+        scrape_item.url = URL(re.sub(pattern, r'host.church/', str(scrape_item.url)))
         filename, ext = await get_filename_and_ext(scrape_item.url.name)
         await self.handle_file(scrape_item.url, scrape_item, filename, ext)
 
@@ -141,7 +145,7 @@ class JPGChurchCrawler(Crawler):
 
     async def check_direct_link(self, url: URL) -> bool:
         """Determines if the url is a direct link or not"""
-        cdn_possibilities = r"^(?:(jpg.church\/images\/...)|(simp..jpg.church)|(jpg.fish\/images\/...)|(simp..jpg.fish)|(jpg.fishing\/images\/...)|(simp..jpg.fishing))"
+        cdn_possibilities = r"^(?:(jpg.church\/images\/...)|(simp..jpg.church)|(jpg.fish\/images\/...)|(simp..jpg.fish)|(jpg.fishing\/images\/...)|(simp..jpg.fishing)|(simp..host.church))"
         if not re.match(cdn_possibilities, url.host):
             return False
         return True

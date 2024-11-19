@@ -15,10 +15,10 @@ if TYPE_CHECKING:
     from cyberdrop_dl.managers.manager import Manager
 
 
-class Rule34XYZCrawler(Crawler):
+class Rule34VaultCrawler(Crawler):
     def __init__(self, manager: Manager):
-        super().__init__(manager, "rule34.xyz", "Rule34XYZ")
-        self.primary_base_url = URL("https://rule34.xyz")
+        super().__init__(manager, "rule34vault", "Rule34Vault")
+        self.primary_base_url = URL("https://rule34vault.com")
         self.request_limiter = AsyncLimiter(10, 1)
 
     """~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"""
@@ -29,6 +29,8 @@ class Rule34XYZCrawler(Crawler):
 
         if "post" in scrape_item.url.parts:
             await self.file(scrape_item)
+        elif "playlists" in scrape_item.url.parts:
+            await self.playlist(scrape_item)
         else:
             await self.tag(scrape_item)
 
@@ -42,8 +44,8 @@ class Rule34XYZCrawler(Crawler):
 
         title = await self.create_title(scrape_item.url.parts[1], None, None)
 
-        content_block = soup.select_one('div[class="box-grid ng-star-inserted"]')
-        content = content_block.select("a[class=boxInner]")
+        content_block = soup.select_one('div[class="grid ng-star-inserted"]')
+        content = content_block.select('a[class="box ng-star-inserted"]')
         for file_page in content:
             link = file_page.get('href')
             if link.startswith("/"):
@@ -63,15 +65,44 @@ class Rule34XYZCrawler(Crawler):
         self.manager.task_group.create_task(self.run(new_scrape_item))
 
     @error_handling_wrapper
+    async def playlist(self, scrape_item: ScrapeItem) -> None:
+        """Scrapes a playlist"""
+        async with self.request_limiter:
+            soup = await self.client.get_BS4(self.domain, scrape_item.url)
+
+        title_str = soup.select_one('div[class*=title]').text
+        title = await self.create_title(title_str, scrape_item.url.parts[-1], None)
+
+        content_block = soup.select_one('div[class="grid ng-star-inserted"]')
+        content = content_block.select('a[class="box ng-star-inserted"]')
+        for file_page in content:
+            link = file_page.get('href')
+            if link.startswith("/"):
+                link = f"{self.primary_base_url}{link}"
+            link = URL(link)
+            new_scrape_item = await self.create_scrape_item(scrape_item, link, title, True)
+            self.manager.task_group.create_task(self.run(new_scrape_item))
+        if not content:
+            return
+
+        if scrape_item.url.query:
+            page = scrape_item.url.query.get("page")
+            next_page = scrape_item.url.with_query({"page": int(page) + 1})
+        else:
+            next_page = scrape_item.url.with_query({"page": 2})
+        new_scrape_item = await self.create_scrape_item(scrape_item, next_page, "")
+        self.manager.task_group.create_task(self.run(new_scrape_item))
+
+    @error_handling_wrapper
     async def file(self, scrape_item: ScrapeItem) -> None:
         """Scrapes an image"""
         async with self.request_limiter:
             soup = await self.client.get_BS4(self.domain, scrape_item.url)
 
-        date = await self.parse_datetime(soup.select_one('div[class="posted ng-star-inserted"]').text.split("(")[1].split(")")[0])
+        date = await self.parse_datetime(soup.select_one('div[class="text-primary ng-star-inserted"]').text.split("(")[1].split(")")[0])
         scrape_item.date = date
 
-        image = soup.select_one('img[class*="img shadow-base"]')
+        image = soup.select_one('img[class*="img ng-star-inserted"]')
         if image:
             link = image.get('src')
             if link.startswith("/"):

@@ -20,11 +20,8 @@ if TYPE_CHECKING:
 class BunkrrCrawler(Crawler):
     def __init__(self, manager: Manager):
         super().__init__(manager, "bunkrr", "Bunkrr")
-        self.primary_base_domain = URL("https://www.bunkrr.su")
-        self.ddos_guard_domain = URL("https://*.bunkrr.su")
+        self.primary_base_domain = URL("https://bunkr.sk")
         self.request_limiter = AsyncLimiter(10, 1)
-
-        self.cookies_set = False
 
     """~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"""
 
@@ -33,7 +30,11 @@ class BunkrrCrawler(Crawler):
         task_id = await self.scraping_progress.add_task(scrape_item.url)
         scrape_item.url = await self.get_stream_link(scrape_item.url)
 
-        await self.set_cookies()
+        if scrape_item.url.host.startswith("get"):
+            scrape_item.url = await self.reinforced_link(scrape_item.url)
+            if not scrape_item.url:
+                return
+            scrape_item.url = await self.get_stream_link(scrape_item.url)
 
         if "a" in scrape_item.url.parts:
             await self.album(scrape_item)
@@ -48,6 +49,8 @@ class BunkrrCrawler(Crawler):
     async def album(self, scrape_item: ScrapeItem) -> None:
         """Scrapes an album"""
         scrape_item.url = self.primary_base_domain.with_path(scrape_item.url.path)
+        album_id = scrape_item.url.parts[2]
+        results = await self.get_album_results(album_id)
 
         async with self.request_limiter:
             soup = await self.client.get_BS4(self.domain, scrape_item.url)
@@ -72,28 +75,30 @@ class BunkrrCrawler(Crawler):
                 filename = card_listing.select_one("div[class*=details]").select_one("p").text
                 file_ext = "." + filename.split(".")[-1]
                 if file_ext.lower() not in FILE_FORMATS['Images'] and file_ext.lower() not in FILE_FORMATS['Videos']:
-                    raise Exception()
+                    raise FileNotFoundError()
                 image_obj = file.select_one("img")
                 src = image_obj.get("src")
-                src = src.replace("/thumbs", "")
+                src = src.replace("/thumbs/", "/")
                 src = URL(src, encoded=True)
                 src = src.with_suffix(file_ext)
                 src = src.with_query("download=true")
                 if file_ext.lower() not in FILE_FORMATS['Images']:
                     src = src.with_host(src.host.replace("i-", ""))
-                new_scrape_item = await self.create_scrape_item(scrape_item, link, "", True, date)
+                new_scrape_item = await self.create_scrape_item(scrape_item, link, "", True, album_id, date)
 
-                if await self.check_complete_from_referer(scrape_item):
-                    continue
+                if "no-image" in src.name:
+                    raise FileNotFoundError("No image found, reverting to parent")
 
                 filename, ext = await get_filename_and_ext(src.name)
-                await self.handle_file(src, new_scrape_item, filename, ext)
-            except Exception as e:
-                self.manager.task_group.create_task(self.run(ScrapeItem(link, scrape_item.parent_title, True, date)))
+                if not await self.check_album_results(src, results):
+                    await self.handle_file(src, new_scrape_item, filename, ext)
+            except FileNotFoundError:
+                self.manager.task_group.create_task(self.run(ScrapeItem(link, scrape_item.parent_title, True, album_id, date)))
 
     @error_handling_wrapper
     async def video(self, scrape_item: ScrapeItem) -> None:
         """Scrapes a video"""
+        scrape_item.url = self.primary_base_domain.with_path(scrape_item.url.path)
         if await self.check_complete_from_referer(scrape_item):
             return
 
@@ -105,13 +110,26 @@ class BunkrrCrawler(Crawler):
         try:
             filename, ext = await get_filename_and_ext(link.name)
         except NoExtensionFailure:
-            filename, ext = await get_filename_and_ext(scrape_item.url.name)
+            try:
+                link_container = soup.select_one("source")
+                link = URL(link_container.get('src'))
+                filename, ext = await get_filename_and_ext(link.name)
+            except NoExtensionFailure:
+                if "get" in link.host:
+                    link = await self.reinforced_link(link)
+                    if not link:
+                        return
+                    filename, ext = await get_filename_and_ext(link.name)
+                else:
+                    filename, ext = await get_filename_and_ext(scrape_item.url.name)
 
         await self.handle_file(link, scrape_item, filename, ext)
 
     @error_handling_wrapper
     async def other(self, scrape_item: ScrapeItem) -> None:
         """Scrapes an image/other file"""
+        scrape_item.url = self.primary_base_domain.with_path(scrape_item.url.path)
+        
         if await self.check_complete_from_referer(scrape_item):
             return
 
@@ -123,15 +141,35 @@ class BunkrrCrawler(Crawler):
         try:
             filename, ext = await get_filename_and_ext(link.name)
         except NoExtensionFailure:
-            filename, ext = await get_filename_and_ext(scrape_item.url.name)
+            if "get" in link.host:
+                link = await self.reinforced_link(link)
+                if not link:
+                    return
+                filename, ext = await get_filename_and_ext(link.name)
+            else:
+                filename, ext = await get_filename_and_ext(scrape_item.url.name)
 
         await self.handle_file(link, scrape_item, filename, ext)
+
+    @error_handling_wrapper
+    async def reinforced_link(self, url: URL) -> URL:
+        """Gets the download link for a given reinforced URL"""
+        """get.bunkr.su"""
+        async with self.request_limiter:
+            soup = await self.client.get_BS4(self.domain, url)
+        
+        try:
+            link_container = soup.select('a[download*=""]')[-1]
+        except IndexError:
+            link_container = soup.select('a[class*=download]')[-1]
+        link = URL(link_container.get('href'))
+        return link
 
     """~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"""
 
     async def get_stream_link(self, url: URL) -> URL:
         """Gets the stream link for a given url"""
-        cdn_possibilities = r"^(?:(?:(?:media-files|cdn|c|pizza|cdn-burger)[0-9]{0,2})|(?:(?:big-taco-|cdn-pizza|cdn-meatballs|cdn-milkshake|meatballs|i.kebab|i.fries)[0-9]{0,2}(?:redir)?))\.bunkr?\.[a-z]{2,3}$"
+        cdn_possibilities = r"^(?:(?:(?:media-files|cdn|c|pizza|cdn-burger|cdn-nugget|burger|taquito|pizza|fries|meatballs|milkshake|kebab)[0-9]{0,2})|(?:(?:big-taco-|cdn-pizza|cdn-meatballs|cdn-milkshake|i.kebab|i.fries|i-nugget|i-milkshake)[0-9]{0,2}(?:redir)?))\.bunkr?\.[a-z]{2,3}$"
 
         if not re.match(cdn_possibilities, url.host):
             return url
@@ -153,19 +191,3 @@ class BunkrrCrawler(Crawler):
         """Parses a datetime string into a unix timestamp"""
         date = datetime.datetime.strptime(date, "%H:%M:%S %d/%m/%Y")
         return calendar.timegm(date.timetuple())
-
-    """~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"""
-
-    async def set_cookies(self):
-        """Sets the cookies for the client"""
-        if self.cookies_set:
-            return
-
-        if self.manager.config_manager.authentication_data['DDOS-Guard']['bunkrr_ddg1']:
-            self.client.client_manager.cookies.update_cookies({"__ddg1_": self.manager.config_manager.authentication_data['DDOS-Guard']['bunkrr_ddg1']}, response_url=self.ddos_guard_domain)
-        if self.manager.config_manager.authentication_data['DDOS-Guard']['bunkrr_ddg2']:
-            self.client.client_manager.cookies.update_cookies({"__ddg2_": self.manager.config_manager.authentication_data['DDOS-Guard']['bunkrr_ddg2']}, response_url=self.ddos_guard_domain)
-        if self.manager.config_manager.authentication_data['DDOS-Guard']['bunkrr_ddgid']:
-            self.client.client_manager.cookies.update_cookies({"__ddgid_": self.manager.config_manager.authentication_data['DDOS-Guard']['bunkrr_ddgid']}, response_url=self.ddos_guard_domain)
-
-        self.cookies_set = True

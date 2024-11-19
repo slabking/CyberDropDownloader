@@ -24,7 +24,7 @@ class DownloadStatsProgress:
 
     async def update_total(self, total: int) -> None:
         """Updates the total number of files to be downloaded"""
-        for key in self.failure_types.keys():
+        for key in self.failure_types:
             self.progress.update(self.failure_types[key], total=total)
 
     async def add_failure(self, failure_type: [str, int]) -> None:
@@ -44,7 +44,7 @@ class DownloadStatsProgress:
         failures = {}
         for key, value in self.failure_types.items():
             failures[key] = self.progress.tasks[value].completed
-        return failures
+        return dict(sorted(failures.items()))
 
 
 class ScrapeStatsProgress:
@@ -66,7 +66,7 @@ class ScrapeStatsProgress:
 
     async def update_total(self, total: int) -> None:
         """Updates the total number of sites to be scraped"""
-        for key in self.failure_types.keys():
+        for key in self.failure_types:
             self.progress.update(self.failure_types[key], total=total)
 
     async def add_failure(self, failure_type: [str, int]) -> None:
@@ -86,4 +86,4 @@ class ScrapeStatsProgress:
         failures = {}
         for key, value in self.failure_types.items():
             failures[key] = self.progress.tasks[value].completed
-        return failures
+        return dict(sorted(failures.items()))

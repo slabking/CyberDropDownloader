@@ -19,6 +19,7 @@ class EHentaiCrawler(Crawler):
     def __init__(self, manager: Manager):
         super().__init__(manager, "e-hentai", "E-Hentai")
         self.request_limiter = AsyncLimiter(10, 1)
+        self.warnings_set = False
 
     """~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"""
 
@@ -27,6 +28,8 @@ class EHentaiCrawler(Crawler):
         task_id = await self.scraping_progress.add_task(scrape_item.url)
 
         if "g" in scrape_item.url.parts:
+            if not self.warnings_set:
+                await self.set_no_warnings(scrape_item)
             await self.album(scrape_item)
         elif "s" in scrape_item.url.parts:
             await self.image(scrape_item)
@@ -48,7 +51,7 @@ class EHentaiCrawler(Crawler):
         images = soup.select("div[class=gdtm] div a")
         for image in images:
             link = URL(image.get('href'))
-            new_scrape_item = await self.create_scrape_item(scrape_item, link, title, True, date)
+            new_scrape_item = await self.create_scrape_item(scrape_item, link, title, True, None, date)
             self.manager.task_group.create_task(self.run(new_scrape_item))
 
         next_page_opts = soup.select('td[onclick="document.location=this.firstChild.href"]')
@@ -84,3 +87,11 @@ class EHentaiCrawler(Crawler):
             date = date + ":00"
         date = datetime.datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
         return calendar.timegm(date.timetuple())
+
+    @error_handling_wrapper
+    async def set_no_warnings(self, scrape_item) -> None:
+        """Sets the no warnings cookie"""
+        self.warnings_set = True
+        async with self.request_limiter:
+            scrape_item.url = URL(str(scrape_item.url) + "/").update_query("nw=session")
+            await self.client.get_BS4(self.domain, scrape_item.url)

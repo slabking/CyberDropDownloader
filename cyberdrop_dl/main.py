@@ -52,6 +52,27 @@ async def director(manager: Manager) -> None:
     manager.path_manager.startup()
     manager.log_manager.startup()
 
+    logger_debug = logging.getLogger("cyberdrop_dl_debug")
+    import cyberdrop_dl.utils.utilities
+    if os.getenv("PYCHARM_HOSTED") is not None or manager.config_manager.settings_data['Runtime_Options']['log_level'] == -1:
+        manager.config_manager.settings_data['Runtime_Options']['log_level'] = 10
+        cyberdrop_dl.utils.utilities.DEBUG_VAR = True
+        
+    if cyberdrop_dl.utils.utilities.DEBUG_VAR:
+        logger_debug.setLevel(manager.config_manager.settings_data['Runtime_Options']['log_level'])
+        if os.getenv("PYCHARM_HOSTED") is not None:
+            file_handler_debug = logging.FileHandler("../cyberdrop_dl_debug.log", mode="w")
+        else:
+            file_handler_debug = logging.FileHandler("./cyberdrop_dl_debug.log", mode="w")
+        file_handler_debug.setLevel(manager.config_manager.settings_data['Runtime_Options']['log_level'])
+        formatter = logging.Formatter("%(levelname)-8s : %(asctime)s : %(filename)s:%(lineno)d : %(message)s")
+        file_handler_debug.setFormatter(formatter)
+        logger_debug.addHandler(file_handler_debug)
+
+        # aiosqlite_log = logging.getLogger("aiosqlite")
+        # aiosqlite_log.setLevel(manager.config_manager.settings_data['Runtime_Options']['log_level'])
+        # aiosqlite_log.addHandler(file_handler_debug)
+
     while True:
         logger = logging.getLogger("cyberdrop_dl")
         if manager.args_manager.all_configs:
@@ -59,6 +80,7 @@ async def director(manager: Manager) -> None:
                 await log("Picking new config...", 20)
 
             configs_to_run = list(set(configs) - set(configs_ran))
+            configs_to_run.sort()
             manager.config_manager.change_config(configs_to_run[0])
             configs_ran.append(configs_to_run[0])
             if len(logger.handlers) > 0:
@@ -69,6 +91,9 @@ async def director(manager: Manager) -> None:
 
         logger.setLevel(manager.config_manager.settings_data['Runtime_Options']['log_level'])
         file_handler = logging.FileHandler(manager.path_manager.main_log, mode="w")
+        
+        if cyberdrop_dl.utils.utilities.DEBUG_VAR:
+            manager.config_manager.settings_data['Runtime_Options']['log_level'] = 10
         file_handler.setLevel(manager.config_manager.settings_data['Runtime_Options']['log_level'])
 
         formatter = logging.Formatter("%(levelname)-8s : %(asctime)s : %(filename)s:%(lineno)d : %(message)s")
@@ -79,27 +104,36 @@ async def director(manager: Manager) -> None:
         await manager.async_startup()
 
         await log("Starting UI...", 20)
-        try:
-            if not manager.args_manager.no_ui:
-                with Live(manager.progress_manager.layout, refresh_per_second=10):
+        if not manager.args_manager.sort_all_configs:
+            try:
+                if not manager.args_manager.no_ui:
+                    with Live(manager.progress_manager.layout, refresh_per_second=manager.config_manager.global_settings_data['UI_Options']['refresh_rate']):
+                        await runtime(manager)
+                else:
                     await runtime(manager)
-            else:
-                await runtime(manager)
-        except Exception as e:
-            print("\nAn error occurred, please report this to the developer")
-            print(e)
-            print(traceback.format_exc())
-            exit(1)
+            except Exception as e:
+                print("\nAn error occurred, please report this to the developer")
+                print(e)
+                print(traceback.format_exc())
+                exit(1)
 
         clear_screen_proc = await asyncio.create_subprocess_shell('cls' if os.name == 'nt' else 'clear')
         await clear_screen_proc.wait()
 
-        await log("Running Post-Download Processes...", 20)
-        if manager.config_manager.settings_data['Sorting']['sort_downloads'] and not manager.args_manager.retry:
+        await log_with_color(f"Running Post-Download Processes For Config: {manager.config_manager.loaded_config}...", "green", 20)
+        if isinstance(manager.args_manager.sort_downloads, bool):
+            if manager.args_manager.sort_downloads:
+                sorter = Sorter(manager)
+                await sorter.sort()
+        elif manager.config_manager.settings_data['Sorting']['sort_downloads'] and not manager.args_manager.retry:
             sorter = Sorter(manager)
             await sorter.sort()
         await check_partials_and_empty_folders(manager)
-
+        
+        if manager.config_manager.settings_data['Runtime_Options']['update_last_forum_post']:
+            await log("Updating Last Forum Post...", 20)
+            await manager.log_manager.update_last_forum_post()
+            
         await log("Printing Stats...", 20)
         await manager.progress_manager.print_stats()
 
@@ -116,8 +150,6 @@ async def director(manager: Manager) -> None:
 
     await log_with_color("\nFinished downloading. Enjoy :)", 'green', 20)
 
-    asyncio.get_event_loop().stop()
-
 
 def main():
     manager = startup()
@@ -129,11 +161,10 @@ def main():
             asyncio.run(director(manager))
         except KeyboardInterrupt:
             print("\nTrying to Exit...")
-            try:
+            with contextlib.suppress(Exception):
                 asyncio.run(manager.close())
-            except Exception:
-                pass
             exit(1)
+    loop.close()
     sys.exit(0)
 
 

@@ -6,13 +6,6 @@ from cyberdrop_dl.managers.path_manager import APP_STORAGE, DOWNLOAD_STORAGE
 
 
 authentication_settings: Dict = {
-    "DDOS-Guard": {
-        "bunkrr_ddg1": "",
-        "bunkrr_ddg2": "",
-        "bunkrr_ddgid": "",
-        "coomer_ddg1": "",
-        "kemono_ddg1": "",
-    },
     "Forums": {
         "celebforum_xf_user_cookie": "",
         "celebforum_username": "",
@@ -106,6 +99,7 @@ settings: Dict = {
         "skip_check_for_empty_folders": False,
         "delete_partial_files": False,
         "send_unsupported_to_jdownloader": False,
+        "update_last_forum_post": False,
     },
     "Sorting": {
         "sort_downloads": False,
@@ -124,6 +118,7 @@ global_settings: Dict = {
         "allow_insecure_connections": False,
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
         "proxy": "",
+        "flaresolverr": "",
         "max_file_name_length": 95,
         "max_folder_name_length": 60,
         "required_free_space": 5,
@@ -137,5 +132,11 @@ global_settings: Dict = {
         "max_simultaneous_downloads": 15,
         "max_simultaneous_downloads_per_domain": 5,
     },
+    "UI_Options": {
+        "vi_mode": False,
+        "refresh_rate": 10,
+        "scraping_item_limit": 5,
+        "downloading_item_limit": 5,
+    }
 }
 

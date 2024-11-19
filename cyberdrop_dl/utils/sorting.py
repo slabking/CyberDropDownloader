@@ -4,8 +4,8 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import PIL
 import filedate
+import PIL
 from PIL import Image
 from videoprops import get_audio_properties, get_video_properties
 
@@ -13,6 +13,13 @@ from cyberdrop_dl.utils.utilities import FILE_FORMATS, log_with_color, purge_dir
 
 if TYPE_CHECKING:
     from cyberdrop_dl.managers.manager import Manager
+
+
+def get_file_date_in_us_ca_formats(file: Path) -> tuple[str, str]:
+    file_date = filedate.File(str(file)).get()
+    file_date_us = file_date['modified'].strftime("%Y-%d-%m")
+    file_date_ca = file_date['modified'].strftime("%Y-%m-%d")
+    return file_date_us, file_date_ca
 
 
 class Sorter:
@@ -51,10 +58,10 @@ class Sorter:
                 file.unlink()
                 return
             for i in itertools.count(1):
-                dest = dest.parent / f"{dest.stem}{self.incrementer_format.format(i=i)}{dest.suffix}"
-                if not dest.is_file():
+                dest_make = dest.parent / f"{dest.stem}{self.incrementer_format.format(i=i)}{dest.suffix}"
+                if not dest_make.is_file():
                     break
-            file.rename(dest)
+            file.rename(dest_make)
 
     async def check_dir_parents(self) -> bool:
         """Checks if the sort dir is in the download dir"""
@@ -68,6 +75,10 @@ class Sorter:
         await log_with_color("\nSorting Downloads: Please Wait", "cyan", 20)
 
         if await self.check_dir_parents():
+            return
+        
+        if not self.download_dir.is_dir():
+            await log_with_color("Download Directory does not exist", "red", 40)
             return
 
         for folder in self.download_dir.iterdir():
@@ -111,12 +122,9 @@ class Sorter:
             bitrate = "Unknown"
             sample_rate = "Unknown"
 
-        file_date = filedate.File(str(file)).get()
-        file_date_us = file_date['modified'].strftime("%Y-%d-%m")
-        file_date_ca = file_date['modified'].strftime("%Y-%m-%d")
-
         parent_name = file.parent.name
         filename, ext = file.stem, file.suffix
+        file_date_us, file_date_ca = get_file_date_in_us_ca_formats(file)
 
         new_file = Path(self.audio_format.format(sort_dir=self.sorted_downloads, base_dir=base_name, parent_dir=parent_name,
                                                  filename=filename, ext=ext, length=length, bitrate=bitrate,
@@ -133,15 +141,12 @@ class Sorter:
             width, height = image.size
             resolution = f"{width}x{height}"
             image.close()
-        except PIL.UnidentifiedImageError:
+        except (PIL.UnidentifiedImageError, PIL.Image.DecompressionBombError):
             resolution = "Unknown"
-
-        file_date = filedate.File(str(file)).get()
-        file_date_us = file_date['modified'].strftime("%Y-%d-%m")
-        file_date_ca = file_date['modified'].strftime("%Y-%m-%d")
 
         parent_name = file.parent.name
         filename, ext = file.stem, file.suffix
+        file_date_us, file_date_ca = get_file_date_in_us_ca_formats(file)
 
         new_file = Path(self.image_format.format(sort_dir=self.sorted_downloads, base_dir=base_name, parent_dir=parent_name,
                                                  filename=filename, ext=ext, resolution=resolution, file_date_us=file_date_us,
@@ -168,12 +173,9 @@ class Sorter:
             frames_per_sec = "Unknown"
             codec = "Unknown"
 
-        file_date = filedate.File(str(file)).get()
-        file_date_us = file_date['modified'].strftime("%Y-%d-%m")
-        file_date_ca = file_date['modified'].strftime("%Y-%m-%d")
-
         parent_name = file.parent.name
         filename, ext = file.stem, file.suffix
+        file_date_us, file_date_ca = get_file_date_in_us_ca_formats(file)
 
         new_file = Path(self.video_format.format(sort_dir=self.sorted_downloads, base_dir=base_name, parent_dir=parent_name,
                                                  filename=filename, ext=ext, resolution=resolution, fps=frames_per_sec,
@@ -187,10 +189,7 @@ class Sorter:
 
         parent_name = file.parent.name
         filename, ext = file.stem, file.suffix
-
-        file_date = filedate.File(str(file)).get()
-        file_date_us = file_date['modified'].strftime("%Y-%d-%m")
-        file_date_ca = file_date['modified'].strftime("%Y-%m-%d")
+        file_date_us, file_date_ca = get_file_date_in_us_ca_formats(file)
 
         new_file = Path(self.other_format.format(sort_dir=self.sorted_downloads, base_dir=base_name, parent_dir=parent_name,
                                                  filename=filename, ext=ext, file_date_us=file_date_us, file_date_ca=file_date_ca))

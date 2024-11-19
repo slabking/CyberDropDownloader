@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import shutil
 from base64 import b64encode
 from typing import TYPE_CHECKING
 
-from cyberdrop_dl.utils.utilities import FILE_FORMATS
+from cyberdrop_dl.utils.utilities import FILE_FORMATS, log_debug
 
 if TYPE_CHECKING:
     from typing import Dict
@@ -22,17 +23,21 @@ class FileLock:
     async def check_lock(self, filename: str) -> None:
         """Checks if the file is locked"""
         try:
+            await log_debug(f"Checking lock for {filename}", 40)
             await self._locked_files[filename].acquire()
+            await log_debug(f"Lock for {filename} acquired", 40)
         except KeyError:
+            await log_debug(f"Lock for {filename} does not exist", 40)
             self._locked_files[filename] = asyncio.Lock()
             await self._locked_files[filename].acquire()
+            await log_debug(f"Lock for {filename} acquired", 40)
 
     async def release_lock(self, filename: str) -> None:
         """Releases the file lock"""
-        try:
+        with contextlib.suppress(KeyError, RuntimeError):
+            await log_debug(f"Releasing lock for {filename}", 40)
             self._locked_files[filename].release()
-        except (KeyError, RuntimeError):
-            pass
+            await log_debug(f"Lock for {filename} released", 40)
 
 
 class DownloadManager:
@@ -42,7 +47,7 @@ class DownloadManager:
 
         self.file_lock = FileLock()
 
-        self.download_limits = {'bunkr': 1, 'bunkrr': 1, 'cyberdrop': 1, 'coomer': 2, 'cyberfile': 2, 'kemono': 2, "pixeldrain": 2}
+        self.download_limits = {'bunkr': 1, 'bunkrr': 1, 'cyberdrop': 1, 'cyberfile': 1, "pixeldrain": 2}
 
     async def get_download_limit(self, key: str) -> int:
         """Returns the download limit for a domain"""
@@ -70,11 +75,11 @@ class DownloadManager:
         """Checks if the file type is allowed to download"""
         if media_item.ext in FILE_FORMATS['Images'] and self.manager.config_manager.settings_data['Ignore_Options']['exclude_images']:
             return False
-        elif media_item.ext in FILE_FORMATS['Videos'] and self.manager.config_manager.settings_data['Ignore_Options']['exclude_videos']:
+        if media_item.ext in FILE_FORMATS['Videos'] and self.manager.config_manager.settings_data['Ignore_Options']['exclude_videos']:
             return False
-        elif media_item.ext in FILE_FORMATS['Audio'] and self.manager.config_manager.settings_data['Ignore_Options']['exclude_audio']:
+        if media_item.ext in FILE_FORMATS['Audio'] and self.manager.config_manager.settings_data['Ignore_Options']['exclude_audio']:
             return False
-        elif (self.manager.config_manager.settings_data['Ignore_Options']['exclude_other'] and
+        if (self.manager.config_manager.settings_data['Ignore_Options']['exclude_other'] and
               media_item.ext not in FILE_FORMATS['Images'] and media_item.ext not in FILE_FORMATS['Videos'] and
               media_item.ext not in FILE_FORMATS['Audio']):
             return False

@@ -31,14 +31,15 @@ class ScrapeMapper:
                         "imgur": self.imgur, "img.kiwi": self.imgwiki, "jpg.church": self.jpgchurch,
                         "jpg.homes": self.jpgchurch, "jpg.fish": self.jpgchurch, "jpg.fishing": self.jpgchurch,
                         "jpg.pet": self.jpgchurch, "jpeg.pet": self.jpgchurch, "jpg1.su": self.jpgchurch,
-                        "jpg2.su": self.jpgchurch, "jpg3.su": self.jpgchurch, "kemono": self.kemono,
-                        "leakedmodels": self.leakedmodels, "mediafire": self.mediafire, "nudostar.com": self.nudostar,
-                        "nudostar.tv": self.nudostartv, "omegascans": self.omegascans, "pimpandhost": self.pimpandhost,
-                        "pixeldrain": self.pixeldrain, "postimg": self.postimg, "reddit": self.reddit,
-                        "redd.it": self.reddit, "redgifs": self.redgifs, "rule34.xxx": self.rule34xxx,
+                        "jpg2.su": self.jpgchurch, "jpg3.su": self.jpgchurch, "jpg4.su": self.jpgchurch,
+                        "host.church": self.jpgchurch, "kemono": self.kemono, "leakedmodels": self.leakedmodels,
+                        "mediafire": self.mediafire, "nudostar.com": self.nudostar, "nudostar.tv": self.nudostartv,
+                        "omegascans": self.omegascans, "pimpandhost": self.pimpandhost, "pixeldrain": self.pixeldrain,
+                        "postimg": self.postimg, "realbooru": self.realbooru, "reddit": self.reddit, 
+                        "redd.it": self.reddit, "redgifs": self.redgifs, "rule34vault": self.rule34vault, "rule34.xxx": self.rule34xxx,
                         "rule34.xyz": self.rule34xyz, "saint": self.saint, "scrolller": self.scrolller,
-                        "simpcity": self.simpcity, "socialmediagirls": self.socialmediagirls,
-                        "toonily": self.toonily, "xbunker": self.xbunker, "xbunkr": self.xbunkr, "bunkr": self.bunkrr}
+                        "simpcity": self.simpcity, "socialmediagirls": self.socialmediagirls, "toonily": self.toonily, 
+                        "xbunker": self.xbunker, "xbunkr": self.xbunkr, "bunkr": self.bunkrr}
         self.existing_crawlers = {}
         self.no_crawler_downloader = Downloader(self.manager, "no_crawler")
         self.jdownloader = JDownloader(self.manager)
@@ -136,6 +137,8 @@ class ScrapeMapper:
         self.existing_crawlers['jpg1.su'] = self.existing_crawlers['jpg.church']
         self.existing_crawlers['jpg2.su'] = self.existing_crawlers['jpg.church']
         self.existing_crawlers['jpg3.su'] = self.existing_crawlers['jpg.church']
+        self.existing_crawlers['jpg4.su'] = self.existing_crawlers['jpg.church']
+        self.existing_crawlers['host.church'] = self.existing_crawlers['jpg.church']
 
     async def kemono(self) -> None:
         """Creates a Kemono Crawler instance"""
@@ -181,6 +184,11 @@ class ScrapeMapper:
         """Creates a PostImg Crawler instance"""
         from cyberdrop_dl.scraper.crawlers.postimg_crawler import PostImgCrawler
         self.existing_crawlers['postimg'] = PostImgCrawler(self.manager)
+        
+    async def realbooru(self) -> None:
+        """Creates a RealBooru Crawler instance"""
+        from cyberdrop_dl.scraper.crawlers.realbooru_crawler import RealBooruCrawler
+        self.existing_crawlers['realbooru'] = RealBooruCrawler(self.manager)
 
     async def reddit(self) -> None:
         """Creates a Reddit Crawler instance"""
@@ -192,6 +200,11 @@ class ScrapeMapper:
         """Creates a RedGifs Crawler instance"""
         from cyberdrop_dl.scraper.crawlers.redgifs_crawler import RedGifsCrawler
         self.existing_crawlers['redgifs'] = RedGifsCrawler(self.manager)
+
+    async def rule34vault(self) -> None:
+        """Creates a Rule34Vault Crawler instance"""
+        from cyberdrop_dl.scraper.crawlers.rule34vault_crawler import Rule34VaultCrawler
+        self.existing_crawlers['rule34vault'] = Rule34VaultCrawler(self.manager)
 
     async def rule34xxx(self) -> None:
         """Creates a Rule34XXX Crawler instance"""
@@ -249,9 +262,8 @@ class ScrapeMapper:
 
     async def start_jdownloader(self) -> None:
         """Starts JDownloader"""
-        if self.jdownloader.enabled:
-            if isinstance(self.jdownloader.jdownloader_agent, Field):
-                await self.jdownloader.jdownloader_setup()
+        if self.jdownloader.enabled and isinstance(self.jdownloader.jdownloader_agent, Field):
+            await self.jdownloader.jdownloader_setup()
 
     async def start(self) -> None:
         """Starts the orchestra"""
@@ -285,15 +297,16 @@ class ScrapeMapper:
     async def load_links(self) -> None:
         """Loads links from args / input file"""
         input_file = self.manager.path_manager.input_file
-        if self.manager.args_manager.input_file:
-            input_file = Path(self.manager.args_manager.input_file)
 
         links = []
         if not self.manager.args_manager.other_links:
+            block_quote = False
             async with aiofiles.open(input_file, "r", encoding="utf8") as f:
                 async for line in f:
                     assert isinstance(line, str)
-                    links.extend(await self.regex_links(line))
+                    block_quote = not block_quote if line == "#\n" else block_quote
+                    if not block_quote:
+                        links.extend(await self.regex_links(line))
         else:
             links.extend(self.manager.args_manager.other_links)
         links = list(filter(None, links))
@@ -308,8 +321,8 @@ class ScrapeMapper:
         """Loads failed links from db"""
         items = await self.manager.db_manager.history_table.get_failed_items()
         for item in items:
-            link = URL(item[2])
-            retry_path = Path(item[3])
+            link = URL(item[0])
+            retry_path = Path(item[1])
 
             item = ScrapeItem(link, parent_title="", part_of_album=True, retry=True, retry_path=retry_path)
             self.manager.task_group.create_task(self.map_url(item))
@@ -335,12 +348,12 @@ class ScrapeMapper:
         if not isinstance(scrape_item.url, URL):
             try:
                 scrape_item.url = URL(scrape_item.url)
-            except Exception as e:
+            except AttributeError:
                 return
         try:
             if not scrape_item.url.host:
                 return
-        except Exception as e:
+        except AttributeError:
             return
 
         # blocked domains
@@ -355,9 +368,10 @@ class ScrapeMapper:
                     skip = True
                     break
         if self.manager.config_manager.settings_data['Ignore_Options']['only_hosts']:
+            skip = True
             for only_host in self.manager.config_manager.settings_data['Ignore_Options']['only_hosts']:
-                if only_host not in scrape_item.url.host:
-                    skip = True
+                if only_host in scrape_item.url.host:
+                    skip = False
                     break
 
         if str(scrape_item.url).endswith("/"):
@@ -387,7 +401,7 @@ class ScrapeMapper:
             scrape_item.part_of_album = True
             download_folder = await get_download_path(self.manager, scrape_item, "no_crawler")
             filename, ext = await get_filename_and_ext(scrape_item.url.name)
-            media_item = MediaItem(scrape_item.url, scrape_item.url, download_folder, filename, ext, filename)
+            media_item = MediaItem(scrape_item.url, scrape_item.url, None, download_folder, filename, ext, filename)
             self.manager.task_group.create_task(self.no_crawler_downloader.run(media_item))
 
         elif self.jdownloader.enabled:

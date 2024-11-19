@@ -73,15 +73,16 @@ class SimpCityCrawler(Crawler):
     async def forum(self, scrape_item: ScrapeItem) -> None:
         """Scrapes an album"""
         continue_scraping = True
-        if "post-" in str(scrape_item.url):
-            url_parts = str(scrape_item.url).rsplit("post-", 1)
-            thread_url = URL(url_parts[0].rstrip("#"))
-            post_number = int(url_parts[-1].strip("/")) if len(url_parts) == 2 else 0
-        else:
-            thread_url = scrape_item.url
-            post_number = 0
-        current_post_number = 0
 
+        thread_url = scrape_item.url
+        post_number = 0
+        if len(scrape_item.url.parts) > 3:
+            if "post-" in str(scrape_item.url.parts[3]) or "post-" in scrape_item.url.fragment:
+                url_parts = str(scrape_item.url).rsplit("post-", 1)
+                thread_url = URL(url_parts[0].rstrip("#"))
+                post_number = int(url_parts[-1].strip("/")) if len(url_parts) == 2 else 0
+
+        current_post_number = 0
         while True:
             async with self.request_limiter:
                 soup = await self.client.get_BS4(self.domain, thread_url)
@@ -96,19 +97,18 @@ class SimpCityCrawler(Crawler):
             posts = soup.select(self.posts_selector)
             for post in posts:
                 current_post_number = int(post.select_one(self.posts_number_selector).get(self.posts_number_attribute).split('/')[-1].split('post-')[-1])
-                if post_number > current_post_number:
-                    continue
+                scrape_post, continue_scraping = await self.check_post_number(post_number, current_post_number)
 
-                date = int(post.select_one(self.post_date_selector).get(self.post_date_attribute))
-                new_scrape_item = await self.create_scrape_item(scrape_item, thread_url, title, False, date)
+                if scrape_post:
+                    date = int(post.select_one(self.post_date_selector).get(self.post_date_attribute))
+                    new_scrape_item = await self.create_scrape_item(scrape_item, thread_url, title, False, None, date)
 
-                for elem in post.find_all(self.quotes_selector):
-                    elem.decompose()
-                post_content = post.select_one(self.posts_content_selector)
-                await self.post(new_scrape_item, post_content, current_post_number)
+                    # for elem in post.find_all(self.quotes_selector):
+                    #     elem.decompose()
+                    post_content = post.select_one(self.posts_content_selector)
+                    await self.post(new_scrape_item, post_content, current_post_number)
 
-                if self.manager.config_manager.settings_data['Download_Options']['scrape_single_forum_post']:
-                    continue_scraping = False
+                if not continue_scraping:
                     break
 
             next_page = soup.select_one(self.next_page_selector)
@@ -147,7 +147,7 @@ class SimpCityCrawler(Crawler):
         links = post_content.select(self.links_selector)
         for link_obj in links:
             test_for_img = link_obj.select_one("img")
-            if test_for_img is not None:
+            if test_for_img is not None and self.attachment_url_part not in link_obj.get(self.links_attribute):
                 continue
 
             link = link_obj.get(self.links_attribute)
@@ -187,9 +187,8 @@ class SimpCityCrawler(Crawler):
                 continue
 
             parent_simp_check = image.parent.get("data-simp")
-            if parent_simp_check:
-                if "init" in parent_simp_check:
-                    continue
+            if parent_simp_check and "init" in parent_simp_check:
+                continue
 
             link = link.replace(".th.", ".").replace(".md.", ".")
             if link.endswith("/"):
@@ -205,7 +204,7 @@ class SimpCityCrawler(Crawler):
                 new_scrape_item = await self.create_scrape_item(scrape_item, link, "")
                 await self.handle_external_links(new_scrape_item)
             elif self.attachment_url_part in link.parts:
-                await self.handle_internal_links(link, scrape_item)
+                continue
             else:
                 await log(f"Unknown image type: {link}", 30)
                 continue

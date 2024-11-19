@@ -39,6 +39,8 @@ class Manager:
         self.task_group: asyncio.TaskGroup = field(init=False)
         self.task_list: list = []
         self.scrape_mapper = field(init=False)
+        
+        self.vi_mode: bool = None
 
     def startup(self) -> None:
         """Startup process for the manager"""
@@ -53,6 +55,7 @@ class Manager:
         self.cache_manager.startup(self.path_manager.cache_dir / "cache.yaml")
         self.config_manager = ConfigManager(self)
         self.config_manager.startup()
+        self.vi_mode = self.config_manager.global_settings_data['UI_Options']['vi_mode'] if self.args_manager.vi_mode is None else self.args_manager.vi_mode
 
         self.path_manager.startup()
         self.log_manager = LogManager(self)
@@ -69,22 +72,25 @@ class Manager:
         await self.args_consolidation()
         await self.args_logging()
 
-        self.db_manager = DBManager(self, self.path_manager.history_db)
-        self.client_manager = ClientManager(self)
-        self.download_manager = DownloadManager(self)
+        if not isinstance(self.db_manager, DBManager):
+            self.db_manager = DBManager(self, self.path_manager.history_db)
+            self.db_manager.ignore_history = self.config_manager.settings_data['Runtime_Options']['ignore_history']
+            await self.db_manager.startup()
+        if not isinstance(self.client_manager, ClientManager):
+            self.client_manager = ClientManager(self)
+        if not isinstance(self.download_manager, DownloadManager):
+            self.download_manager = DownloadManager(self)
         self.progress_manager = ProgressManager(self)
+        await self.progress_manager.startup()
 
+        # set files from args
         from cyberdrop_dl.utils.utilities import MAX_NAME_LENGTHS
         MAX_NAME_LENGTHS['FILE'] = int(self.config_manager.global_settings_data['General']['max_file_name_length'])
         MAX_NAME_LENGTHS['FOLDER'] = int(self.config_manager.global_settings_data['General']['max_folder_name_length'])
 
-        self.db_manager.ignore_history = self.config_manager.settings_data['Runtime_Options']['ignore_history']
-        await self.db_manager.startup()
-        await self.progress_manager.startup()
-
     async def args_consolidation(self) -> None:
         """Consolidates runtime arguments with config values"""
-        for arg in self.args_manager.parsed_args.keys():
+        for arg in self.args_manager.parsed_args:
             if arg in config_definitions.settings['Download_Options']:
                 if self.args_manager.parsed_args[arg] != config_definitions.settings['Download_Options'][arg]:
                     self.config_manager.settings_data['Download_Options'][arg] = self.args_manager.parsed_args[arg]
@@ -114,25 +120,15 @@ class Manager:
             else:
                 forum_credentials_provided[f"{forum} Credentials Provided"] = False
 
-        gofile_credentials_provided = True if self.config_manager.authentication_data["GoFile"]['gofile_api_key'] else False
-        bunkr_ddg_credentials_provided = False
-        coomer_ddg_credentials_provided = False
-        kemono_ddg_credentials_provided = False
+        gofile_credentials_provided = bool(self.config_manager.authentication_data["GoFile"]["gofile_api_key"])
 
-        if self.config_manager.authentication_data["DDOS-Guard"]['bunkrr_ddg1'] and self.config_manager.authentication_data["DDOS-Guard"]['bunkrr_ddg2'] and self.config_manager.authentication_data["DDOS-Guard"]['bunkrr_ddgid']:
-            bunkr_ddg_credentials_provided = True
-        if self.config_manager.authentication_data["DDOS-Guard"]['coomer_ddg1']:
-            coomer_ddg_credentials_provided = True
-        if self.config_manager.authentication_data["DDOS-Guard"]['kemono_ddg1']:
-            kemono_ddg_credentials_provided = True
-
-        imgur_credentials_provided = True if self.config_manager.authentication_data["Imgur"]['imgur_client_id'] else False
+        imgur_credentials_provided = bool(self.config_manager.authentication_data["Imgur"]["imgur_client_id"])
         jdownloader_credentials_provided = False
 
         if self.config_manager.authentication_data["JDownloader"]['jdownloader_username'] and self.config_manager.authentication_data["JDownloader"]['jdownloader_password'] and self.config_manager.authentication_data["JDownloader"]['jdownloader_device']:
             jdownloader_credentials_provided = True
 
-        pixeldrain_credentials_provided = True if self.config_manager.authentication_data["PixelDrain"]['pixeldrain_api_key'] else False
+        pixeldrain_credentials_provided = bool(self.config_manager.authentication_data["PixelDrain"]["pixeldrain_api_key"])
         reddit_credentials_provided = False
 
         if self.config_manager.authentication_data["Reddit"]['reddit_personal_use_script'] and self.config_manager.authentication_data["Reddit"]['reddit_secret']:
@@ -142,11 +138,6 @@ class Manager:
             "Forums Credentials": forum_credentials_provided,
             "Forums XF Cookies": forum_xf_cookies_provided,
             "GoFile Provided": gofile_credentials_provided,
-            "DDOS-Guard": {
-                "Bunkrr Provided": bunkr_ddg_credentials_provided,
-                "Coomer Provided": coomer_ddg_credentials_provided,
-                "Kemono Provided": kemono_ddg_credentials_provided
-            },
             "Imgur Provided": imgur_credentials_provided,
             "JDownloader Provided": jdownloader_credentials_provided,
             "PixelDrain Provided": pixeldrain_credentials_provided,
@@ -159,8 +150,8 @@ class Manager:
         print_settings["Logs"]["log_folder"] = str(print_settings["Logs"]["log_folder"])
         print_settings['Sorting']['sort_folder'] = str(print_settings['Sorting']['sort_folder'])
 
-        input_file = str(self.config_manager.settings_data['Files']['input_file']) if not self.args_manager.input_file else str(self.args_manager.input_file)
-        download_dir = str(self.config_manager.settings_data['Files']['download_folder']) if not self.args_manager.download_dir else str(self.args_manager.download_dir)
+        input_file = str(self.path_manager.input_file)
+        download_dir = str(self.path_manager.download_dir)
 
         await log(f"Starting Cyberdrop-DL Process for {self.config_manager.loaded_config} Config", 10)
         await log(f"Running version {__version__}", 10)

@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING
 import rich
 from yarl import URL
 
-from cyberdrop_dl.clients.errors import NoExtensionFailure, FailedLoginFailure, InvalidContentTypeFailure
+from cyberdrop_dl.clients.errors import NoExtensionFailure, FailedLoginFailure, InvalidContentTypeFailure, \
+    PasswordProtected
 
 if TYPE_CHECKING:
     from typing import Tuple
@@ -22,8 +23,11 @@ if TYPE_CHECKING:
     from cyberdrop_dl.utils.dataclasses.url_objects import ScrapeItem
 
 logger = logging.getLogger("cyberdrop_dl")
+logger_debug = logging.getLogger("cyberdrop_dl_debug")
 
 MAX_NAME_LENGTHS = {"FILE": 95, "FOLDER": 60}
+
+DEBUG_VAR = False
 
 FILE_FORMATS = {
     'Images': {
@@ -53,10 +57,7 @@ def error_handling_wrapper(func):
     """Wrapper handles errors for url scraping"""
     @wraps(func)
     async def wrapper(self, *args, **kwargs):
-        if isinstance(args[0], URL):
-            link = args[0]
-        else:
-            link = args[0].url
+        link = args[0] if isinstance(args[0], URL) else args[0].url
 
         try:
             return await func(self, *args, **kwargs)
@@ -64,6 +65,10 @@ def error_handling_wrapper(func):
             await log(f"Scrape Failed: {link} (No File Extension)", 40)
             await self.manager.log_manager.write_scrape_error_log(link, " No File Extension")
             await self.manager.progress_manager.scrape_stats_progress.add_failure("No File Extension")
+        except PasswordProtected:
+            await log(f"Scrape Failed: {link} (Password Protected)", 40)
+            await self.manager.log_manager.write_unsupported_urls_log(link)
+            await self.manager.progress_manager.scrape_stats_progress.add_failure("Password Protected")
         except FailedLoginFailure:
             await log(f"Scrape Failed: {link} (Failed Login)", 40)
             await self.manager.log_manager.write_scrape_error_log(link, " Failed Login")
@@ -96,11 +101,21 @@ def error_handling_wrapper(func):
 async def log(message: [str, Exception], level: int) -> None:
     """Simple logging function"""
     logger.log(level, message)
+    if DEBUG_VAR:
+        logger_debug.log(level, message)
+
+
+async def log_debug(message: [str, Exception], level: int) -> None:
+    """Simple logging function"""
+    if DEBUG_VAR:
+        logger_debug.log(level, message.encode('ascii', 'ignore').decode('ascii'))
 
 
 async def log_with_color(message: str, style: str, level: int) -> None:
     """Simple logging function with color"""
     logger.log(level, message)
+    if DEBUG_VAR:
+        logger_debug.log(level, message)
     rich.print(f"[{style}]{message}[/{style}]")
 
 
@@ -147,6 +162,8 @@ async def get_filename_and_ext(filename: str, forum: bool = False) -> Tuple[str,
         raise NoExtensionFailure()
     if filename_parts[-1].isnumeric() and forum:
         filename_parts = filename_parts[0].rsplit('-', 1)
+    if len(filename_parts[-1]) > 5:
+        raise NoExtensionFailure()
     ext = "." + filename_parts[-1].lower()
     filename = filename_parts[0][:MAX_NAME_LENGTHS['FILE']] if len(filename_parts[0]) > MAX_NAME_LENGTHS['FILE'] else filename_parts[0]
     filename = filename.strip()
@@ -158,8 +175,6 @@ async def get_filename_and_ext(filename: str, forum: bool = False) -> Tuple[str,
 async def get_download_path(manager: Manager, scrape_item: ScrapeItem, domain: str) -> Path:
     """Returns the path to the download folder"""
     download_dir = manager.path_manager.download_dir
-    if manager.args_manager.download_dir:
-        download_dir = Path(manager.args_manager.download_dir)
 
     if scrape_item.retry:
         return scrape_item.retry_path
